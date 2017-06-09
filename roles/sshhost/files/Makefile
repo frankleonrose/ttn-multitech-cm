@@ -4,7 +4,9 @@ GW_KEYS=../../conduit/files/authorized_keys
 
 all:: authorized_keys
 
+fetch::
+	echo Nothing to fetch for sshhost
+
 authorized_keys: ../${CATDIR}/*.json
 	cat ${GW_KEYS} > "$@"
 	${BINDIR}/gen_authorized_keys >> "$@" || rm "$@"
-
