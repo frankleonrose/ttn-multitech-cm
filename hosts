@@ -1,0 +1,17 @@
+[test]
+
+[production]
+ttn-futurose-parkslope1
+
+[conduits]
+
+[conduits:children]
+production
+test
+
+[all]
+
+[all:vars]
+
+[ssh_host]
+jumphost.example.com

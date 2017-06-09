@@ -1,0 +1,20 @@
+---
+
+# Hostname.  Start with ttn-ORG
+hostname: ttn-futurose-parkslope1
+
+# Define this to use an ssh tunnel
+#ssh_tunnel_remote_port: 22
+
+# Actual address or hostname of the gateway
+ansible_host: gateway.thethings
+ansible_port: 22
+
+# Descriptive location of the gateway
+description: TTN Gateway in Park Slope
+
+# Location, use -1 for altitude if not known
+# 294 6th St. Brooklyn NY 11215 USA
+latitude: 40.671460
+longitude: -73.986267
+altitude: -1
