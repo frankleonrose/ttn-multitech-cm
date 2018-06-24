@@ -2,10 +2,13 @@
 
 from __future__ import print_function
 import argparse
+import fcntl
+import json
 import os
 import re
 import subprocess
 import sys
+import urllib2
 
 """
 MIT License
@@ -32,34 +35,71 @@ SOFTWARE.
 """
 
 register_url = "https://account.thethingsnetwork.org/users/authorize?client_id=ttnctl&redirect_uri=/oauth/callback/ttnctl&response_type=code"
+regions = {
+    "AS1": {
+        "plan": "AS_920_923"
+    },
+    "AS2": {
+        "plan": "AS_923_925"
+    },
+    "AU": {
+        "plan": "AU_915_928"
+    },
+    "EU": {
+        "plan": "EU_863_870"
+    },
+    "IN": {
+        "plan": "IN_865_867"
+    },
+    "KR": {
+        "plan": "KR_920_923"
+    },
+    "US": {
+        "plan": "US_902_928"
+    },
+}
 
 #
 #	Gateway list
 #
 class Gateway(object):
     """Class to hold Gateway info"""
-    def __init__(self, options, name, frequency_plan, latitude, longitude):
+
+    info_re = re.compile(r"^\s+(?P<key>[A-za-z ]+):\s(?P<value>.*)\s*$")
+
+    def __init__(self, options, id, frequency_plan=None, latitude=None, longitude=None, router=None):
         """"""
         self.options = options
-        self.name = name
+        self.id = id
         self.frequency_plan = frequency_plan
-        self.latitude = float(latitude)
-        self.longitude = float(longitude)
+        self.latitude = float(latitude) if latitude else latitude
+        self.longitude = float(longitude) if longitude else longitude
+        self.router = router
         self.registered = False
+        self.description = None
+        self.brand = None
+        self.model = None
+        self.antenna_type = None
+        self.antenna_model = None
 
     def __repr__(self):
-        return "%s: %s %s %f, %f" % (self.name, self.activated, self.frequency_plan, self.latitude, self.longitude)
+        return "%s: %s %s %f, %f %s" % (self.id, self.activated, self.frequency_plan, self.latitude, self.longitude, self.router)
 
-    def register(self):
+    def register(self, frequency_plan, latitude, longitude, router):
+        """ Register the gateway """
         rc = 0
         try:
-            cmd = [ self.options.binary, "gateway", "register", self.name, self.frequency_plan, '%f,%f' % (self.latitude, self.longitude) ]
+            cmd = [ self.options.binary, "gateway", "register", self.id, frequency_plan, '%f,%f' % (latitude, longitude) ]
+            cmd.append("--router-id")	# Router for register/edit
+            cmd.append(self.options.router)
             if self.options.noop:
                 output = "NOOP: %s " % " ".join(cmd)
             else:
                 if self.options.debug:
-                    print("DBG: %s" % " ".join(cmd))
+                    print("DBG: %s" % " ".join(cmd), file=sys.stderr)
                 output = subprocess.check_output(cmd)
+                if self.options.debug:
+                    print("DBG: %s" % "\nDBG: ".join(output.split("\n")), file=sys.stderr)
                 self.registered = True
         except subprocess.CalledProcessError as e:
             rc = e.returncode
@@ -67,8 +107,62 @@ class Gateway(object):
             
         return [ rc, output ] 
 
-    def edit(self, frequency_plan, latitude, longitude):
+    def delete(self):
+        """ Delete this gateway """
+
+        rc = 0
+        try:
+            cmd = [ self.options.binary, "gateway", "delete", self.id ]
+            if self.options.noop:
+                output = "NOOP: %s " % " ".join(cmd)
+            else:
+                if self.options.debug:
+                    print("DBG: %s" % " ".join(cmd), file=sys.stderr)
+                output = subprocess.check_output(cmd)
+                if self.options.debug:
+                    print("DBG: %s" % "\nDBG: ".join(output.split("\n")), file=sys.stderr)
+                self.registered = True
+        except subprocess.CalledProcessError as e:
+            rc = e.returncode
+            output = e.output
+
+        return [ rc, output ] 
+
+    def collaborators(self):
+        """ Set collaborators """
+
+        output = []
+        for col in json.loads(self.options.collaborators):
+            changes = []
+            changes.append(col.get('username'))
+            rights = col.get('rights')
+            if rights:
+                changes.append(rights)
+
+            try:
+                cmd = [ self.options.binary, "gateway", "collaborators", "add", self.id ] + changes
+                if self.options.noop:
+                    output.append("NOOP: %s " % " ".join(cmd))
+                else:
+                    if self.options.debug:
+                        print("DBG: %s" % " ".join(cmd), file=sys.stderr)
+                    out = subprocess.check_output(cmd)
+                    output.append(out)
+                    if self.options.debug:
+                        print("DBG: %s" % "\nDBG: ".join(out.split("\n")), file=sys.stderr)
+            except subprocess.CalledProcessError as e:
+                return [ e.returncode, e.outout ]
+                rc = e.returncode
+                output = e.output
+                break
+
+        return [ 0, '\n'.join(output) ] 
+
+
+    def edit(self, frequency_plan, latitude, longitude, router):
         """ Change registration if something is different """
+
+        self.get_info()
         changes = []
         if self.frequency_plan != frequency_plan:
             changes.append("--frequency-plan")
@@ -76,27 +170,105 @@ class Gateway(object):
         if self.latitude != latitude or self.longitude != longitude:
             changes.append("--location")
             changes.append("%f,%f" % (latitude, longitude))
+        if router and self.router != router:
+            changes.append("--router-id")	# Router to configure
+            changes.append(router)
+            changes.append("--router")		# Router for register/edit
+            changes.append(router)
+        if self.options.description and self.description != self.options.description:
+            changes.append("--description")
+            changes.append(self.options.description)
+        if self.options.brand and self.brand != self.options.brand:
+            changes.append("--brand")
+            changes.append(self.options.brand)
+        if self.options.model and self.model != self.options.model:
+            changes.append("--model")
+            changes.append(self.options.model)
+        if self.options.antenna_type and self.antenna_type != self.options.antenna_type:
+            changes.append("--antenna-type")
+            changes.append(self.options.antenna_type)
+        if self.options.antenna_model and self.antenna_model != self.options.antenna_model:
+            changes.append("--antenna-model")
+            changes.append(self.options.antenna_model)
 
         if not changes:
             return [ 0, "No changes required" ]
                 
-        if changes:
-            try:
-                cmd = [ self.options.binary, "gateway", "edit", self.name ] + changes
-                if self.options.noop:
-                    output = "NOOP: %s " % " ".join(cmd)
-                else:
-                    if self.options.debug:
-                        print("DBG: %s" % " ".join(cmd))
-                    output = subprocess.check_output(cmd)
-                    self.frequency_plan = frequency_plan
-                    self.latitude = latitude
-                    self.longitude = longitude
-            except subprocess.CalledProcessError as e:
-                rc = e.returncode
-                output = e.output
+        try:
+            cmd = [ self.options.binary, "gateway", "edit", self.id ] + changes
+            if self.options.noop:
+                output = "NOOP: %s " % " ".join(cmd)
+            else:
+                if self.options.debug:
+                    print("DBG: %s" % " ".join(cmd), file=sys.stderr)
+                output = subprocess.check_output(cmd)
+                if self.options.debug:
+                    print("DBG: %s" % "\nDBG: ".join(output.split("\n")), file=sys.stderr)
+                self.frequency_plan = frequency_plan
+                self.latitude = latitude
+                self.longitude = longitude
+            rc = 0
+        except subprocess.CalledProcessError as e:
+            rc = e.returncode
+            output = e.output
             
-            return [ rc, output ] 
+        return [ rc, output ] 
+
+    def get_json(self):
+        """ Get the JSON info """
+
+        url = "https://account.thethingsnetwork.org/gateways/%s" % self.id
+        try:
+            request = urllib2.Request(url)
+            request.add_header("Key", self.key)
+            response = urllib2.urlopen(request)
+        except urllib2.URLError as err:
+            sys.exit("Error loading %s: %s" % (url, err))
+
+        return json.loads(response.read())
+
+    def get_info(self):
+        """ Get additional info via 'info' subcommand """
+
+        try:
+            cmd = [ self.options.binary, "gateway", "info", self.id ]
+            if self.options.debug:
+                print("DBG: %s" % " ".join(cmd), file=sys.stderr)
+            lines = subprocess.check_output(cmd)
+        except subprocess.CalledProcessError as e:
+            print(e.output, file=sys.stderr, end="")
+
+        good_stuff = False
+        for line in lines.split("\n"):
+            if line.strip() == "":
+                continue
+
+            if line.strip().find("Found gateway") != -1:
+                good_stuff = True
+                continue
+
+            if line.strip() == "Collaborators:":
+                break
+            
+            match = self.info_re.match(line)
+            if not match:
+                continue
+
+            if match.group('key') == "Router":
+                self.router = match.group('value')
+            elif match.group('key') == "Access Key":
+                self.key = match.group('value')
+            elif match.group('key') == "Description":
+                self.description = match.group('value')
+            elif match.group('key') == "Brand":
+                self.brand = match.group('value')
+            elif match.group('key') == "Model":
+                self.model = match.group('value')
+            elif match.group('key') == "AntennaType":
+                self.antenna_type = match.group('value')
+            elif match.group('key') == "AntennaModel":
+                self.antenna_model = match.group('value')
+
         
 def ttn_gateway_list(options):
     """Return a dict of Gateways"""
@@ -104,7 +276,7 @@ def ttn_gateway_list(options):
 #        ID              Activated       Frequency Plan  Coordinates                        
     header_re = re.compile("^\s+ID")
 #1       ttn-ith-test    false           AU_915_928      (42.517288, -76.710183, %!f(int=0))    
-    line_re = re.compile("^\d+\s+([a-z0-9-]+)\s+(true|false)\s+((AU|EU|US|AS)_\d{3}_\d{3})\s+\((-?\d+\.\d+),\s+(-?\d+.\d+),.*$")
+    line_re = re.compile("^\d+\s+([a-z0-9-]+)\s+(true|false)\s+((AU|EU|IN|KR|US|AS)_\d{3}_\d{3})\s+\((-?\d+\.\d+),\s+(-?\d+.\d+),.*$")
 
     gateways = dict()
     
@@ -112,7 +284,7 @@ def ttn_gateway_list(options):
     try:
         cmd = [ options.binary, "gateway", "list" ]
         if options.debug:
-            print("DBG: %s" % " ".join(cmd))
+            print("DBG: %s" % " ".join(cmd), file=sys.stderr)
         lines = subprocess.check_output(cmd)
     except subprocess.CalledProcessError as e:
         rc = e.returncode
@@ -125,9 +297,9 @@ def ttn_gateway_list(options):
         match = line_re.match(line)
         if not match:
             continue
-        gateway = Gateway(options, match.group(1), match.group(3), match.group(5), match.group(6))
+        gateway = Gateway(options, match.group(1), match.group(3), match.group(5), match.group(6), None)
         gateway.activated = bool(match.group(2))
-        gateways[gateway.name] = gateway
+        gateways[gateway.id] = gateway
 
     return gateways
         
@@ -160,70 +332,122 @@ def main():
 
     #	Options
     group = parser.add_argument_group("Configuration options")
-    group.add_argument("--name",
-                       dest="name",
-                       help="Gateway name")
-    group.add_argument("--eui",
-                       dest="eui", required=True,
-                       help="EUI of Conduit")
+    group.add_argument("--id",
+                       dest="id", required=True,
+                       help="Gateway ID")
+    group.add_argument("--description",
+                       dest="description",
+                       help="Description of the Gateway")
+    group.add_argument("--brand",
+                       dest="brand",
+                       help="Brand of the Gateway")
+    group.add_argument("--model",
+                       dest="model",
+                       help="Model of the Gateway")
+    group.add_argument("--antenna-type",
+                       dest="antenna_type",
+                       help="Antenna Type")
+    group.add_argument("--antenna-model",
+                       dest="antenna_model",
+                       help="Antenna model")
+    group.add_argument("--old_id",
+                       dest="old_id",
+                       help="Old ID of Gateway to remove")
     group.add_argument("--region",
                        dest="region", required=True,
-		       choices=[ "AU", "EU", "US" ],
-                       help="Frequency region, one of AU, EU, US")
+		       choices=regions.keys(),
+                       help="Frequency region, one of %s" % ",".join(regions.keys()))
+    group.add_argument("--router", "--router-id",
+                       dest="router",
+                       choices=["",
+                                "switch-router",
+                                "ttn-router-asia-se",
+                                "ttn-router-brazil",
+                                "ttn-router-eu",
+                                "ttn-router-us-west"],
+                       default="ttn-router-us-west",
+                       help="TTN router to use")
     group.add_argument("--latitude",
                        dest="latitude", type=float, required=True,
                        help="Latitude of Conduit")
     group.add_argument("--longitude",
                        dest="longitude", type=float, required=True,
                        help="Longitude of Conduit")
+    group.add_argument("--collaborators",
+                       dest="collaborators",
+                       help="Collaborators in JSON format")
 
     #   Other options
     group = parser.add_argument_group("Other options")
     group.add_argument("--binary",
                        dest="binary", default="bin/ttnctl",
                        help="Path to binary")
+    group.add_argument("--json",
+                       dest="json", default=False,
+                       action='store_true',
+                       help="Output gateway info as json")
 
     options = parser.parse_args()
-
-    eui_re = re.compile('^(([a-fA-F0-9]{2}:?){7}[a-fA-F0-9]{2})$')
-    if not eui_re.match(options.eui):
-        parser.error("Invalid EUI: %s" % options.eui)
+    if options.debug:
+        options.verbose = options.debug
+    if options.json and options.verbose:
+        parser.error("--json is mutually exclusive with --verbose and --debug")
 
     # Find ttncli binary
     if options.debug:
-        print("DBG: binary: %s" % options.binary)
+        print("DBG: binary: %s" % options.binary, file=sys.stderr)
 
     # Translate region into frequency plan
-    if options.region == "AU":
-        frequency_plan = "AU_915_928"
-    elif options.region == "EU":
-        frequency_plan = "EU_863_870"
-    elif options.region == "US":
-        frequency_plan = "US_902_928"
-
-    # If name is not specified, register the old way
-    if not options.name:
-        options.name = "eui-" + "".join(options.eui.split(":"))
-        if options.debug:
-            print("DBG: %s -> %s" % (options.eui, options.name))
+    frequency_plan = regions[options.region].get('plan')
 
     if options.debug:
-        print("DBG: Name: %s Frequency Plan: %s EUI: %s Location: %f, %f" % (options.name, frequency_plan, options.eui, options.latitude, options.longitude))
+        print("DBG: ID: %s Frequency Plan: %s Location: %f, %f Router: %s" % (options.id,
+                                                                              frequency_plan,
+                                                                              options.latitude,
+                                                                              options.longitude,
+                                                                              options.router),
+              file=sys.stderr)
+
+    try:
+        fd = open(options.binary)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except IOError:
+        sys.exit("Unable to open or lock %s" % options.binary)
 
     gateways = ttn_gateway_list(options)
     if gateways == None:
-        print("Go to %s to get an access code" % register_url, file=sys.stderr)
-        return (1)
+        sys.exit("Go to %s to get an access code" % register_url)
 
-    if gateways.has_key(options.name):
-        rc, output = gateways[options.name].edit(frequency_plan, options.latitude, options.longitude)
-    else:
-        rc, output = Gateway(options, options.name, frequency_plan, options.latitude, options.longitude).register()
+    if options.old_id:
+        try:
+            rc, output = gateways[options.old_id].delete()
+            if rc != 0:
+                if output.find("Gateway with ID %s does not exist" % options.old_id) != -1:
+                    print("Deletion of %s failed: %s" % (options.old_id, output), file=sys.stderr)
+        except KeyError:
+            pass
 
+    rc = 0
+    if not gateways.has_key(options.id):
+        gateway = Gateway(options, options.id)
+        gateways[options.id] = gateway
+        rc, output = gateway.register(frequency_plan, options.latitude, options.longitude, options.router)
+    if rc == 0:
+        rc, output = gateways[options.id].edit(frequency_plan, options.latitude, options.longitude, options.router)
+    if rc == 0 and options.collaborators:
+        rc, output = gateways[options.id].collaborators()
     if rc != 0:
         print("Registration failed: %s" % output, file=sys.stderr)
     elif options.verbose:
-        print(output)
+        print(output, file=sys.stderr)
+
+    if options.json:
+        gw = gateways[options.id]
+        info = {
+            "key": gw.key,
+            "info": gw.get_json()
+        }
+        print(json.dumps(info, indent=4))
 
     return(rc)
 

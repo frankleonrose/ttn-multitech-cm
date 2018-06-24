@@ -1,0 +1,46 @@
+---
+
+- name: Set the timezone
+  file:
+    name: /etc/localtime
+    state: link
+    force: yes
+    src: "/usr/share/zoneinfo/{{ timezone }}"
+
+- name: Set time from ntp server
+  shell: "ntpdate -bu {{ ntp_servers[0] }} && hwclock -wu"
+  ignore_errors: yes
+
+- name: Install ntp packages
+  opkg:
+    name: ntp
+    state: installed
+  when: ansible_local is not defined or ansible_local.opkg is not defined or item|regex_replace('-','_') not in ansible_local.opkg.keys()
+  with_items:
+    - ntp
+    - ntp-utils
+  notify: Reload facts
+
+- name: Create /var/config/ntp
+  file:
+    name: /var/config/ntp
+    state: directory
+    mode: "0755"
+    owner: ntp
+    group: ntp
+
+- name: /var/config/ntp.conf
+  template:
+    src: ntp.conf.j2
+    dest: /var/config/ntp.conf
+    mode: "0644"
+    owner: root
+    group: root
+
+- name: /etc/ntp.conf
+  file:
+    name: /etc/ntp.conf
+    state: link
+    force: yes
+    src: /var/config/ntp.conf
+  notify: restart ntpd

@@ -1,2 +1,30 @@
 ---
-# vars file for setup
+
+# Select the URL
+forwarder_package: "{{ forwarder_variant }}-packet-forwarder"
+forwarder_package_version: "{{ forwarder_package }}_{{forwarder_version }}"
+forwarder_package_full: "{{forwarder_package_version }}_arm926ejste.ipk"
+forwarder_url: "{{ forwarder_baseurl_kersing }}/{{ forwarder_package_full }}"
+
+forwarder_installed_package: "{{ 'poly-packet-forwarder' if ansible_local.opkg.poly_packet_forwarder is defined else 'mp-packet-forwarder' if ansible_local.opkg.mp_packet_forwarder is defined else False }}"
+
+forwarder_installed_version: "{{ ansible_local.opkg.poly_packet_forwarder if ansible_local.opkg.poly_packet_forwarder is defined else ansible_local.opkg.mp_packet_forwarder if ansible_local.opkg.mp_packet_forwarder is defined else False }}"
+
+forwarder_installed: "{{ forwarder_installed_package }}_{{ forwarder_installed_version }}"
+
+# EUI for use with non-TTN forwarders
+lora_eui: "eui-{{ ansible_local.lora.eui|lower }}"
+lora_hostname: "{{ hostname if forwarder_variant == 'mp' else lora_eui }}"
+lora_hostname_delete: "{{ lora_eui if forwarder_variant == 'mp' else hostname }}"
+
+# Is ssh_tunnel enabled
+ssh_tunnel_enabled: "{{ ssh_tunnel_remote_port is defined and ssh_tunnel_remote_port > 0 and ssh_tunnel_remote_user is defined }}"
+ssh_tunnel_daemon_args: "-f -M {{ ssh_tunnel_keepalive_base_port }} -o ServerAliveInterval=30 -o StrictHostKeyChecking=no"
+
+# Is the GPS present?
+have_gps: "{{ gps_device in ansible_local.dev }}"
+
+# Accumulate list of authorized keys
+authorized_keys_list:
+  - "{{ authorized_keys }}"
+  - "{% for group in group_names %}{% if 'authorized_keys_' ~ group in vars %}{{ vars['authorized_keys_' ~ group] }}{% endif %}{% endfor %}"

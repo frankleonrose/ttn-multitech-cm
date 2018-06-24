@@ -5,13 +5,7 @@
 #	Set hostname when /etc/hostsname is updated
 #
 - name: Set hostname
-  shell: "hostname $(cat /etc/hostname)"
-
-#
-#	Restart sshd after config changes
-#
-- name: Restart ssh
-  service: name=ssh state=restarted
+  shell: "hostname -F /etc/hostname"
 
 #
 #	Run update-ca-certificates
@@ -20,10 +14,25 @@
   shell: "update-ca-certificates"
 
 #
+#	Make sure init script is run
+#
+- name: update rc
+  shell: "update-rc.d -f ttn-pkt-forwarder remove; update-rc.d ttn-pkt-forwarder defaults 95 30"
+  
+#
 #	Restart the packet forwarder
 #
 - name: restart ttn-pkt-forwarder
   service: name=ttn-pkt-forwarder state=restarted
+
+#
+#	Remind to
+- name: register gateway
+  debug:
+    msg: "Please go to https://console.thethingsnetwork.org/gateways
+ and update the antenna Altitude and Placement your gateways.  The
+ API does not allow these parameters to be set" 
+  run_once: true
 
 #
 #       Restart ntpd
@@ -36,3 +45,24 @@
 #
 - name: restart ssh_tunnel
   service: name=ssh_tunnel state=restarted
+
+#
+#	Restart sshd after config changes
+#
+- name: Restart ssh
+  service: name=sshd state=restarted
+  async: 1
+  ignore_errors: true
+
+#
+#	Remind 
+#
+- name: interface reboot
+  debug:
+    msg: Interface configuration changed, remember to reboot
+
+#
+#	Reload the facts
+#
+- name: Reload facts
+  include_tasks: reload_facts.yml

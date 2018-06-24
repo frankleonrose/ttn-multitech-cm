@@ -1,25 +1,82 @@
 [appurl]: http://www.thethingsnetwork.org/
 [![The Things Network](https://ttnstaticfile.blob.core.windows.net/static/ttn/media/logo/TheThingsRond.png)][appurl]
 
-# Configuration Management of Multi-Tech Conduits as The Things Network Gateways
+# Configuration Management of MultiTech Conduits as The Things Network Gateways
 
 This repo contains Ansible playbooks and configuration used to manage
-a group of Multi-Tech Conduits
-as [Things Network gateways](http://www.thethingsnetwork.org) in an a
-Things Network
-organization.
-The [MultiConnect® Conduit™](http://www.multitech.com/brands/multiconnect-conduit) is
-one of the more popular [LoRa®](http://lora.multitech.com/) Gateways
-is use.
+a group of [MultiTech MultiConnect®
+Conduit™](http://www.multitech.com/brands/multiconnect-conduit) and
+[MultiConnect® Conduit™ AP](https://www.multitech.com/brands/multiconnect-conduit-ap) gatewys
+as part of a [Things Network](http://www.thethingsnetwork.org) [Community](https://www.thethingsnetwork.org/community).
+
+The
+[MultiConnect® Conduit™](https://www.multitech.com/products/gateways-routers-modems)
+gateways are one of the more popular
+[LoRa®](http://lora.multitech.com/) gateways is use.
 
 # Table of Contents
+1. [About this Repo](#about-this-repo)
 1. [Initial Setup](#initial-setup)
-2. [Deploying a Conduit](#deploying-a-conduit)
-3. [Syncing with Upstream](#syncing-with-upstream)
-4. [Reference](#reference)
-5. [Development](#development)
+1. [Deploying a Conduit](#deploying-a-conduit)
+1. [Syncing with Upstream](#syncing-with-upstream)
+1. [Reference](#reference)
 
 # About this Repo
+
+## Ansible
+
+Ansible works by changing the state of the target system. This
+includes updating configuration files. If manual changes are made to
+these files those changes may be overwritten when running
+Ansilble. It's best to expand the Ansible control repo to support the
+changes you need instead of making local changes.
+
+## mLinux version
+
+This repo has been extensively tested on later versions of mLinux
+3.3.  It is recommended to update conduits to a later version of
+mLinux before running this repo. It is important to keep your version
+of mLinux up to date to keep up with any security fixes.
+
+All of the Multitech images require additional packages installed
+manually to work with this repo. For that reason We recommend our
+[custom build of
+mLinux](https://github.com/IthacaThings/mlinux-images) which has been
+optimized for use with The Things Network. This version has tools to
+preserve configutation during mLinux firmware updates.  In addition
+necessary packages have been pre-installed on this version and
+unnecessary packages have been removed.  Instructions are on the above
+page.
+
+You can find Multitech versions of mLinux on the [image
+downloads](http://www.multitech.net/mlinux/images/)page. Be sure to
+select the correct version for your Conduit (mtcdt) or Conduit AP
+(mtcap). MultiTech has
+[instructions](http://www.multitech.net/developer/software/mlinux/using-mlinux/flashing-mlinux-firmware-for-conduit/)
+for installing mLinux.
+
+*NOTE*: When not using our version of mLinux, most configuration is
+not perserved when doing an mLinux firmware, so make sure you have
+configured Ansible with any configuration.
+
+### Preserving configuration during an mlinux upgrade
+
+The TTNI custom build of mLinux includes a tool to preserve
+configuration during an mLinux firmware upgrade. This tool will
+eventually be installed on any version of mLinux 3.3 configured via
+this Ansible configuration.
+
+Ansible Preserves configuration by ensuring all local changes that
+must be preserved are stored in the /var/config filesystem with
+symlinks from filesystems that are not preserved. The contents of this
+filesystem is normally preserved during a firmware upgrade. In
+addition a script runs before a firmware upgrade and saves a list of
+symlinks into /var/config. These symlinks are restored on the first
+boot after a firmware upgrade.
+
+Packages installed in /opt (such as the Kersing packet forwarder) are
+not preserved and are re-installed by Ansible after a firmware
+upgrade. 
 
 ## Key based authentication
 
@@ -34,19 +91,23 @@ private keys on cloud hosts.
 
 This configuration relies on a *jump host* or ssh tunnel host. For
 various reasons, including security and the complexity of traversing
-firewalls, each conduit will set up a reverse SSH tunnel to a jump
+firewalls, each Conduit will set up a reverse SSH tunnel to a jump
 host. 
 
 It is recommended that these ports only be accessible from that jump
 host. That will mean you need to be logged into the jump host to run
-the Ansible configuration and to ssh into the conduits.
+the Ansible configuration and to ssh into the Conduits.
 
-To ssh into a specific conduit, find it's *ssh_tunnel_remote_port* and
+To ssh into a specific Conduit, find it's *ssh_tunnel_remote_port* and
 issue the following command on the jump host.
 
 ```
 $ ssh -P PORT root@localhost
 ```
+
+If you do not want to use a jump host, comment out
+*ssh_tunnel_remote_port* or set it to *0* in your Conduit's config
+file in *host_vars*.
 
 ## Branches 
 
@@ -57,12 +118,6 @@ This repo has a few main branches:
 This is the repo to clone to generate a configuration for your local
 org.  If you rebase to the latest version of this branch you will get
 all the latest features.
-
-### ttn-ithaca
-
-This is the branch we use for the configuration for TTN Ithaca.  This
-branch will periodically be rebased to master to keep the Ithaca
-configuration in sync.
 
 ### Othar branches
 
@@ -95,27 +150,19 @@ Instructions for installing Ansible
 ## Fetch the upstream files
 
 There is *Makefile* in the root of this repo that can be used to fetch
-files from upstream.  These include the *Poly Packet Forwarder*
-package, global configuration files and the *Let's Encrypt* signing
-certificate.
-
-### make fetch
-There are two commands to relating to fetching upstream files.  This
-command will fetch files that are required, but updates can
-potentially break gateway configuration.  After an initial deploy,
-these updated files should be used in a test environment to ensure
-that nothing breaks before deploying them to a production environment.
-
-Before your initial configuration, run this command.
-
-```
-$ make fetch
-```
+files from upstream.  
 
 ### make all
-Files that are required to run, or are built from data obtained from
-Gateways will be downloaded everytime *make* is run with *all* or no
-argument.
+This command will fetch files that are required to run ansible on the
+target.  Principly the ttnctl binary needed to register a gateway with
+TTN.
+
+Updates can potentially break gateway configuration.  After an initial
+deploy, these updated files should be used in a test environment to
+ensure that nothing breaks before deploying them to a production
+environment.
+
+Before your initial configuration, run this command.
 
 ```
 $ make all
@@ -124,30 +171,31 @@ $ make all
 ## Set up initial files
 
 ### Set Global variables
-Copy *group_vars/conduits-example.yml* to *group_vars/conduits.yaml*
+Copy *group_vars/conduits-example.yml* to *group_vars/conduits.yal*
 and configure your global config items.  The default framework assumes
 that all gateways are in the same region and timezone.
 
 ### Start an inventory
-Copy *hosts-examnple* to *hosts*
+Copy *hosts-example* to *hosts*
 
-### Set authorized keys for logging into conduits
-Copy *roles/conduit/files/authorized_keys-example* to
-*roles/conduit/files/authorized_keys* and add the keys of anyone you
-want to be able to ssh into the conduit. These keys same keys will
-also allow logging in to the jump host.  As mentioned above, it's
-recommended that you use ssh-agent and forward keys from your laptop
-or desktop.
+### Set authorized keys for logging into Conduits
+Edit the *authorized_keys* variable in the group configuration for
+your Conduits (i.e. *group_vars/conduits.yml*) *AND* the jumphost
+configuration (*host_vars/jumphost.example.com/yml*) to provide a list
+of ssh public keys that can have access to your Conduits and jumphost.
+As mentioned above, it's recommended that you use ssh-agent and
+forward keys from your laptop or desktop.
 
 ### Add an ssh tunnel server (i.e. jump host)
 1. Edit *hosts* and change *jumphost.example.com* to the FQDN of your
 ssh tunnel server, aka jumphost.
 2. Copy *group_vars/jumphost.example.com* to
-*group_vars/FQDN_OF_YOUR_JUMPHOST.yam* and edit it as necessary.
+*group_vars/FQDN_OF_YOUR_JUMPHOST.yml* and edit it as necessary.
 
 ## Add each of your gateways to *hosts*
 Normally you would put them in the *production* group.  There is also
-a *test* group.
+a *test* group that you can use if you have one or more gateways you
+use for testing.
 
 You can divide them into other groups, such as different areas of
 your organizations region.  See Ansible documentation
@@ -157,12 +205,13 @@ for more information.
 ## Add a file for each of your hosts in *host_vars/**HOST**.yml*
 Copy *host_vars/ttn-org-example.yml* for each of your nodes.  Remember
 that *ttn-* is constant, *org* should be the name of your TTN
-organization and *example* will be a name for this conduit.
+organization and *example* will be a name for this Conduit.  Use a
+short descriptive name.  I.e. ttn-nyc-midtown or ttn-ith-coopext.
 
 Most of the variables in this file should be self-explanitory.
 
 *NOTE*: that you will need to keep track of the *ssh_tunnel_remote_port*
-values on each of your conduits to make sure they are unique.
+values on each of your Conduits to make sure they are unique.
 
 ## Run a syntax check
 ```
@@ -173,6 +222,7 @@ $ make TARGET=*HOSTNAME* syntax-check
 ```
 $ make TARGET=*HOSTNAME* ping
 ```
+If ssh keys are not yet setup on the Conduit (i.e., if you've not done the first part of "Deploying a Conduit") this will fail.
 
 ## Apply the playbook to the host
 ```
@@ -181,14 +231,64 @@ $ make TARGET=*HOSTNAME* apply
 
 # Deploying a Conduit
 ## Configure host specific data in this control repo
-## Configure the conduit on the local network
+## Configure the Conduit on the local network
+By default a Conduit will come up requesting a DHCP address on the
+local network.  DHCP should also supply one or more nameservers.
+
+You can override this in *host_vars/**HOST**.yml* by uncommenting and
+setting the appropriate variable definitions.  See the examples in
+*host_vars/ttn-org-example.yml*. 
+
+Note that if you make a mistake you may render your Conduit
+unreachable except via the USB serial console.  So double check the
+values you set.
+
+Also note that changing an interface to/from DHCP will require a
+manual reboot of the Conduit after applying the Ansible
+configuration.
+
+###
+
+It is also possible to support WiFi on the Conduit with USB devices
+that have the RealTek 8192cu chip, such as the Edimax EW-7811U.  It
+may be possible to support other devices if you send one to our
+developers.
+
+With mLinux 3.3 we've tried the official Raspberry Pi adapter and the
+Edimax combination Bluetooth/WiFi adapter without success.  A newer
+kernel is required to support those devices.
+
 ## Set a secure root password
-## Copy *roles/conduit/files/authorized_keys* to */home/root/.ssh/*
-## Run the following commands so Ansible can run
+Ansible uses ssh keys to access the Conduit for configuation.  But it
+is very important that you change the root password (which by default
+is `root`).  This will keep someone from logging in and changing your
+configuration, or turning your Conduit into a BotNet node.
+
+On the Conduit:
+```
+mtctd login: root
+passwd:
+root@mtcdt:~# passwd
+Enter new UNIX password:
+Retype new UNIX password:
+root@mtcdt:~#
+```
+Remember the password you supplied above.  
+
+## Provide initial authorizied keys in .root/.ssh/authorized_keys
+The easy way to do this is to open *authorized_keys* with `gedit` on your host, then copy/paste
+to a terminal window.
+
+## Run the following commands to install pre-requisites for Ansible
+### Conduit with mLinux factory image
 ```
 # opkg update
-# opkg install python-pkgutil
-# opkg install python-distutils
+# opkg install python-pkgutil install python-distutils
+```
+### Conduit or Conduit AP with mLinux base image
+```
+# opkg update
+# opkg install python-async python-argparse python-compression python-dateutil python-html python-psutil python-pycurl python-pyopenssl python-pyserial python-pyudev python-pyusb python-simplejson python-syslog python-textutils python-unixadmin python-xml python-distutils python-json python-pkgutil python-shell
 ```
 ## Setup a secure tunnel if the Ansible machine is not on the same network
 ## Test ansible
@@ -197,11 +297,10 @@ $ ansible HOSTNAME -m ping
 ```
 ## Run Ansible
 ```
-$ ansible-playbook -l HOSTNAME site.yaml
+$ ansible-playbook -l HOSTNAME site.yml
 ```
 ## Register the gateway
-Registration happens automatically in the list step of applying the
-playbook.  For this to happen, you need to be logged in.  To do this you need to log into [The Things Network](https://www.thethingsnetwork.org) and then click [this link](https://account.thethingsnetwork.org/users/authorize?client_id=ttnctl&redirect_uri=/oauth/callback/ttnctl&response_type=code) to generate a *TOKEN*.  Then log in using:
+Registration happens automatically during configuration of the router.  For this to happen, you need to be logged in.  To do this you need to log into [The Things Network](https://www.thethingsnetwork.org) and then click [this link](https://account.thethingsnetwork.org/users/authorize?client_id=ttnctl&redirect_uri=/oauth/callback/ttnctl&response_type=code) to generate a *TOKEN*.  Then log in using:
 ```
 $ bin/ttnctl user login *TOKEN*
 ```
@@ -209,16 +308,41 @@ $ bin/ttnctl user login *TOKEN*
 To manually re-run the registration step:
 
 ```
-$ make apply TAGS=register TARGET=*HOSTNAME*
+$ make apply TAGS=loraconfig TARGET=*HOSTNAME*
 ```
 Specify the name of your Conduit with *HOSTNAME*.  If you leave that
 off, all Conduit's will be registered, or their registration will be
 updated. 
 
+# Upgrading mLinux
+It is possible to remotely upgrade to a specific version of mLinux
+using this control repo.  This should be used with caution because if
+an upgrade goes wrong you may leave your Conduit in a state that
+requires manual intervention to restore it.
+
+An upgrade requires lots of space on `/var/volatile` and will fail if
+a lot of space is used by log files.  The best way to clear out the
+space is to reboot, or stop the packet forwarder and delete the log
+file.
+
+Note that you will lose anything you have manually installed outside
+of this control repo, except for files in /usr/local.  That includes
+the home directories for root and the 'ttn' user defined by this repo.
+
+To force a Conduit to mLinux 3.3.7, in *host_vars/**HOST**.yml* set:
+
+```
+mlinux_version: 3.3.7
+```
+
+and run
+
+```make apply```
+
 # Syncing with Upstream
 This is necessary when the global configurations change, or if there
-is a new version of the poly-packet-forwarder.  The same testing steps
-apply if there is a new version of mLinux.
+is a new version of one of the packet forwarder applications.  The
+same testing steps apply if there is a new version of mLinux.
 
 ## Commit all your changes
 Before upgrading to new upstream files you should at least commit all
@@ -244,11 +368,81 @@ If you were working on another branch, push your changes to *master*
 
 # Reference
 
+## Makefile reference
+
+The configuration files/directories can be located outside if this
+repo if you create a link named *.ttn_org* or set the TTN_ORG Makefile
+or environment variable.
+
+### Makefile command line variables
+
+#### TAGS
+
+A comma separated list of tags.  Used to limit what parts of the
+configuration are applied
+
+#### TARGET
+
+A comma separated list of targets, could be *conduit* for all
+conduits, or individual hostnames.
+
+#### OPTIONS
+
+Additional *ansible-playbook* arguments
+
+#### TTN_ORG
+
+If this is defined it points to a directory from which to obtain the
+*hosts* (or *inventory*) and *catalog* directories.  This allows this
+repo to be used with an external configuration.
+
+### Makefile targets
+
+#### apply
+
+Apply the configuration to the specified targets
+
+#### apply-debug
+
+Apply the configuration with full debugging
+
+#### test
+
+Run the rules in test mode. Some rules may fail due to dependencies.
+
+#### test-debug
+
+Test the config with full debugging
+
+#### syntax-check
+
+Run a syntax-check on the configuration
+
+#### ping
+
+Check reachability of all the targets
+
+#### list-hosts
+
+Output a list of all the hosts defiled in *hosts* or *inventory*
+
+#### list-tags
+
+List the tags available
+
+#### retry
+
+Retry the hosts that failed as specified in @site.retry
+
+#### gather
+
+Run a *ping* on all hosts/targets to gather all their facts
+
 ## Ansible directory tree
 + ansible.cfg - General ansible config
 + hosts - lists of ansible hosts in groups
 + group_vars - group specific vars
-    + conduits.yml - Vars for all conduits
+    + conduits.yml - Vars for all Conduits
     + *GROUP*.yml - Group specific vars
 + host_vars - host specific vars
     + *HOST*.yml - Host specific vars
@@ -261,100 +455,5 @@ Variables can be defined at three levels:
 + Per group if you use them (define in **group_vars/GROUP.yml**)
 + Per host (define in **host_vars/HOST.yml**)
 
-The available variables are defined in the [conduit role README](roles/conduit/README.md).
+The available variables are defined in the [Conduit role README](roles/conduit/README.md).
 
----
-
-# Development 
-
-This is a temporary section to track development on this repo.
-
-## Issues
-Things to do before this repo is ready to release to the world.
-
-+ su does not work with busybox so we need to ssh in as root
-+ wget still needs --ca-certificate=/etc/ssl/certs/ca-certificates.crt
-+ Do we set a password for root/ttn or just allow key-based login?
-    + Or do we only allow password login on the console?
-
-
-## TODO
-
-### One-time Ansible setup
-This is performed one-time to setup secure networking and is basically
-repeating above configuration from master config.  Must be performed
-on-site with access to the gateay
-+ SSH tunnel
-+ Login access (ttn account with root access)
-### Standard Ansible setup
-#### Login access
-This secures the box by not having a known account (root) and
-restricting root access.
-+ [X] ttn account
-+ [X] Install SSH keys for root and ttn
-+ [ ] Set root and ttn passwords?
-#### SSH config
-+ [X] Disable password login
-+ [X] Require Keys for root login
-### [X] Install Let's Encrypt Root Certificates
-+ This will avoid the need for --no-check-certificate on wget
-### [X] Set hostname
-This makes it obvious which gateway you are logged in to.
-+ ttn-ORG-NAME (where NAME is descriptive)
-### Set timezone
-+ [X] - Set from Ansible config
-An org is usually all in one timezone so it's just easier to configure
-this globally.  Ansible will spit out error messages if you get it wrong.
-### Set time
-+ [X] Set time when Ansible is run
-+ [X] Configure and start ntpd
-### Disable Multi-Tech Lora daemon
-+ [X] Uninstall lora-network-server with opkg
-### Install TTN packet forwarder
-+ [X] Fetch ipkg of ttn packet forwarder
-+ [X] Install package
-+ [X] Avoid install step if already installed
-+ [X] Overwrite init.d file to not fetch updates
-+ [X] Fetch global config files
-+ [X] Install appropriate config file
-+ [X] Generate local config file
-+ [X] Merge overrides
-+ [X] Restart daemon when done
-
-### SSH Tunnel
-+ [X] Write init.d script
-+ [X] Set parameters in /etc/defaults/XXXX (host, id, port)
-+ [X] Script to keep ssh running
-+ [X] Use system /etc/ssh/ssh_host_rsa_key?  Tells if the system has been updated
-+ [X] Generate authorized_keys scripts for tunnel server
-+ [X] Generate ufw configs (NOT NECESSARY)
-+ [ ] Generate .ssh/config with node names on jump host
-+ [ ] Document sudo password
-+ [X] Use autossh
-+ [ ] Manage tunnel ports
-
-### Registration
-+ [X] Fetch the correct version of [ttnctl](https://www.thethingsnetwork.org/docs/network/cli/quick-start.html#device-management)
-+ [X] Register gateway with TTN
-
-### Firmware updates
-Can we deploy a new version of Multi-Tech mLinux remotely without
-needing to be hands on with the gateways?
-+ [ ] Does /var/config survive firmware updates
-    + [ ] Move root and ttn users home dirs to /var/config
-	+ [ ] Test remote updates
-	+ [ ] Add /etc/init.d service to install Ansible dependencies
-
-### Setup
-#### Makefile targets to
-+ [ ] Add a host
-    + [ ] Validate hostname (ttn-ORG-NAME)
-	+ [ ] Assign tunnel port
-	+ [ ] Prompt for config variables or just edit?
-	+ [ ] Which group to add to?  Allow config parameter?
-+ [ ] Add a host with a tunnel
-+ [X] Collect facts (anisible -m setup)
-+ [X] Ping hosts
-+ [X] Syntax check
-
-### Support new packet forwarder

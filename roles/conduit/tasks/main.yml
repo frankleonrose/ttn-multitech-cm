@@ -3,57 +3,59 @@
 #
 #	Ansible first pass setup
 #
-- name: Install Ansible dependencies
-  opkg: 
-    state: installed
-    pkg: "{{ item }}"
-  with_flattened:
-    - python-pkgutil
-    - python-distutils
-  tags: setup
+- name: Ansible setup
+  import_tasks: ansible.yml
+  tags:
+    - setup
+    - ansible
 
-- name: /var/config/ansible
-  file:
-    name: /var/config/ansible
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-  tags: setup
+#
+#  Set up for preserving config during firmware upgrade
+#
+- name: Preserve config setup
+  import_tasks: preserve.yml
+  when: ansible_local.opkg.preserve is defined
+  tags:
+    - setup
+    - preserve
 
-- name: /var/config/ansible/dirs
-  file:
-    name: "/var/config/ansible/{{ item }}"
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-  with_flattened:
-    - facts.d
-  tags: setup
+#
+#	Update mLinux if required
+#
+- name: Upgrade mlinux
+  import_tasks: mlinux-upgrade.yml
+  when:
+    - mlinux_version is defined
+    - mlinux_version != ansible_local.mlinux.version
+  tags:
+    - setup
+    - mlinux
 
-- name: Point /etc/ansible at /var/config/ansible
-  file:
-    name: /etc/ansible
-    state: link
-    src: /var/config/ansible
-  tags: setup
+- name: Configure mlinux
+  import_tasks: mlinux.yml
+  when:
+    - mlinux_version is defined
+  tags:
+    - setup
+    - mlinux
 
-- name: Install fact scripts
-  copy:
-    src: "{{ item }}"
-    dest: /var/config/ansible/facts.d/
-    mode: "0755"
-    owner: root
-    group: root
-  with_flattened:
-    - lora.fact
-    - conduit.fact
-  tags: setup
+#
+#	Set up logrotate
+#
+- name: Set up logrotate
+  import_tasks: logrotate.yml
+  tags:
+    - logrotate
+    - setup
 
-- name: Reload ansible_local
-  setup: filter=ansible_local
-  tags: setup
+#
+#	Set up networking
+#
+- name: Setup networking
+  import_tasks: networking.yml
+  tags:
+    - networking
+    - setup
 
 #
 #	Set hostname
@@ -65,286 +67,92 @@
     mode: "0644"
     owner: root
     group: root
-  tags: hostname
+  when: hostname is defined
+  tags:
+    - hostname
+    - setup
   notify: Set hostname
 
 #
 #	Set timezone and time
 #
-- name: Set the timezone
-  file:
-    name: /etc/localtime
-    state: link
-    force: yes
-    src: "/usr/share/zoneinfo/{{ timezone }}"
-  tags: time
-
-- name: Set time from ntp server
-  shell: "ntpdate {{ ntp_servers[0] }} && hwclock -wu"
-  ignore_errors: yes
-  tags: time
-
-- name: Install ntpd and utilities
-  opkg:
-    name: "{{ item }}"
-    state: installed
-  with_flattened:
-    - ntp
-    - ntp-utils
-  tags: time
-
-- name: /etc/ntp.conf
-  template:
-    src: ntp.conf.j2
-    dest: /etc/ntp.conf
-    mode: "0644"
-    owner: root
-    group: root
-  tags: time
-  notify: restart ntpd
-    
-  
-#
-#	Set root authorized keys
-#
-- name: Create root .ssh dir
-  file:
-    dest: ~root/.ssh
-    state: directory
-    mode: "0700"
-    owner: root
-    group: root
-  tags: users
-
-- name: Install root authorized keys
-  copy:
-    dest: ~root/.ssh/authorized_keys
-    src: authorized_keys
-    mode: "0600"
-    owner: root
-    group: root
-  tags: users
+- name: Setup time
+  import_tasks: time.yml
+  tags:
+    - time
+    - setup
 
 #
-#	Create ttn user
+#	Set up user stuff
 #
-- name: "Set up {{ ttn_user }} user"
-  user:
-    name: "{{ ttn_user }}"
-    append: yes
-    groups: adm,plugdev,sudo
-    shell: /bin/bash
-    password: "*"
-  tags: users
-
-- name: Create {{ ttn_user }}  .ssh dir
-  file:
-    dest: "~{{ ttn_user }}/.ssh"
-    state: directory
-    mode: "0700"
-    owner: "{{ ttn_user }}"
-    group: "{{ ttn_user }}"
-  tags: users
-
-- name: "Install {{ ttn_user }} authorized keys"
-  copy:
-    dest: "~{{ ttn_user }}/.ssh/authorized_keys"
-    src: authorized_keys
-    mode: "0600"
-    owner: "{{ ttn_user }}"
-    group: "{{ ttn_user }}"
-  tags: users
+- name: Set up users
+  import_tasks: users.yml
+  tags:
+    - users
+    - setup
 
 #
 #	Secure ssh
 #
-
-- name: Disallow password authentication
-  lineinfile: dest=/etc/ssh/sshd_config
-    regexp="^PasswordAuthentication"
-    line="PasswordAuthentication no"
-    state=present
-  notify: Restart ssh
-  tags: sshd
-
-- name: Disallow root SSH access
-  lineinfile: dest=/etc/ssh/sshd_config
-    regexp="^PermitRootLogin"
-    line="PermitRootLogin without-password"
-    state=present
-  notify: Restart ssh
-  tags: sshd
-
-#
-#	Setup local config stuff
-#
-- name: /var/config/local
-  file:
-    name: /var/config/local
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-  tags: localtree
-
-- name: /var/config/local/tree
-  file:
-    name: "/var/config/local/{{ item }}"
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-  with_flattened:
-    - bin
-    - lib
-    - sbin
-    - share
-  tags: localtree
-
-- name: Point /usr/local at /var/config/local
-  file:
-    name: /usr/local
-    state: link
-    src: /var/config/local
-  tags: localtree
-
-#
-#	Remove Multi-Tech stuff that we don't want and install the TTN poly-packet-forwarder
-#
-- name: Remove Multi-Tech lora-network-server
-  opkg:
-    name: lora-network-server
-    state: absent
-  tags: forwarder
-
-- name: Get version of poly-packet-forwarder installed
-  shell: "opkg list-installed | grep poly-packet-forwarder | cut -d ' ' -f 3"
-  register: poly_version_installed
-  tags: forwarder
+- name: Set up ssh
+  import_tasks: sshd.yml
+  tags:
+    - sshd
+    - setup
   
-- name: Copy over poly-packet-forwarder
-  copy:
-    src: "{{ poly_package }}"
-    dest: "/var/tmp/{{ poly_package }}"
-  when: poly_version_installed.stdout != poly_version
-  tags: forwarder
+#
+#	Stop any services we don't want
+#
 
-- name: Install poly-packet-forwarder
-  shell: "opkg install /var/tmp/{{ poly_package }}"
-  when: poly_version_installed.stdout != poly_version
-  tags: forwarder
+- name: Stop mosquitto
+  service: name=mosquitto state=stopped
+  when: ansible_local.opkg.mosquitto is defined
 
-- name: Override /etc/init.d/ttn-pkt-forwarder
-  copy:
-    src: ttn-pkt-forwarder
-    dest: /etc/init.d/
-    mode: "0755"
-    owner: root
-    group: root
-  tags: forwarder
-    
-- name: Clean up poly-packet-forwarder crud
-  file:
-    name: /var/config/lora/local_conf.json-opkg
-    state: absent
-  tags: forwarder
+  ignore_errors: true
+
+- name: Disable mosquitto
+  lineinfile: dest=/etc/default/mosquitto
+    regexp="^ENABLED="
+    line="ENABLED="no""
+    state=present
+  when: ansible_local.opkg.mosquitto is defined
+  tags:
+    - services
+    - setup
 
 #
-#	Install the TTN config files
+#	Set up /usr/local tree
 #
-- name: Lora dir
-  file:
-    name: /var/config/lora
-    mode: "0755"
-    owner: root
-    group: root
-  tags: loraconfig
+- name: Set up /usr/local tree
+  import_tasks: local.yml
+  tags:
+    - localtree
+    - setup
 
-- name: /var/config/lora/local_conf.json
-  template:
-    src: local_conf.json.j2
-    dest: /var/config/lora/local_conf.json
-    mode: "0644"
-    owner: root
-    group: root
-  tags: loraconfig
-    
-- name: /var/config/lora/ttn_global_conf.json
-  copy:
-    src: "{{ region }}-global_conf.json"
-    dest: /var/config/lora/ttn_global_conf.json
-    mode: "0644"
-    owner: root
-    group: root
-  tags: loraconfig
-
-- name: Merge multitech_overrides in global_conf.json
-  shell: node /opt/lora/merge.js /var/config/lora/ttn_global_conf.json /var/config/lora/multitech_overrides.json /var/config/lora/global_conf.json
-  notify: restart ttn-pkt-forwarder
-  tags: loraconfig
+#
+#	Install and configure TTN packet forwarder
+#
+- name: Set up TTN packet forwarder
+  import_tasks: ttn.yml
+  tags:
+    - ttn
 
 #
 #	Install additional ca-certificates
-#	XXX - wget needs #	--ca-certificate=/etc/ssl/certs/ca-certificate.crt to work???
 #
-- name: Local certs directory
-  file:
-    dest: /usr/local/share/ca-certificates
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-  tags: ca-certificates
 
-- name: "Install Let's Encrypt root cert"
-  copy:
-    dest: /usr/local/share/ca-certificates/lets-encrypt-x3-cross-signed.crt
-    src: "{{ item }}"
-    mode: "0644"
-    owner: root
-    group: root
-  with_flattened:
-    - lets-encrypt-x3-cross-signed.pem
-  notify: update-ca-certificates
-  tags: ca-certificates
+- name: Additional Certificates
+  import_tasks: certs.yml
+  tags:
+    - ca-certificates
+    - setup
 
 #
-#	Register gateway
+#	Set up ssh_tunnel (autossh)
 #
-- name: register gateway with TTN
-  local_action:
-    module: shell
-    args: "bin/register --eui {{ansible_local.lora.eui}} --region {{region}} --latitude {{ latitude }} --longitude {{ longitude }}"
-  tags: register
+- name: Set up ssh_tunnel (autossh)
+  import_tasks: ssh_tunnel.yml
+  tags:
+    - ssh_tunnel
+    - setup
 
-#
-#	Set up ssh tunnel
-#
-- name: /etc/default/ssh_tunnel
-  template:
-    src: ssh_tunnel.j2
-    dest: /etc/default/ssh_tunnel
-    mode: "0755"
-    owner: root
-    group: root
-  notify: restart ssh_tunnel
-  when: 
-    - ssh_tunnel_remote_port is defined
-    - ssh_tunnel_remote_port > 0
-  tags: ssh_tunnel
-
-- name: /etc/init.d/ssh_tunnel
-  copy:
-    dest: /etc/init.d/ssh_tunnel
-    src: ssh_tunnel.initd
-    mode: "0755"
-    owner: root
-    group: root
-  notify: restart ssh_tunnel
-  when:
-    - ssh_tunnel_remote_port is defined
-    - ssh_tunnel_remote_port > 0
-  tags: ssh_tunnel
-
-  
-  
